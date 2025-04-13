@@ -20,11 +20,6 @@ MIN_VOLUME = 2000
 CHECK_INTERVAL = 60
 NETWORK = "bsc"
 
-print("ENV DEBUG:")
-print("TOKEN:", os.getenv("TELEGRAM_BOT_TOKEN"))
-print("ADMIN_ID:", os.getenv("TELEGRAM_ADMIN_ID"))
-print("CREDS:", os.getenv("GOOGLE_CREDS")[:30])  # только начало
-
 # --- Проверка переменных окружения ---
 missing_env = []
 if not API_TOKEN:
@@ -71,10 +66,16 @@ async def fetch_new_pairs():
 
 # --- Отправка уведомления с кнопками ---
 async def send_token_alert(pool):
-    token_name = pool['attributes']['base_token']['name']
-    symbol = pool['attributes']['base_token']['symbol']
-    liquidity = float(pool['attributes']['reserve_in_usd'] or 0)
-    volume = float(pool['attributes']['volume_usd']['h1'] or 0)
+    attributes = pool.get('attributes', {})
+    base_token = attributes.get('base_token', {})
+    symbol = base_token.get('symbol')
+    token_name = base_token.get('name')
+
+    if not symbol or not token_name:
+        return  # Пропускаем, если информации нет
+
+    liquidity = float(attributes.get('reserve_in_usd') or 0)
+    volume = float(attributes.get('volume_usd', {}).get('h1') or 0)
     pair_url = f"https://www.geckoterminal.com/{NETWORK}/pools/{pool['id'].split('_')[-1]}"
 
     if liquidity < MIN_LIQUIDITY or volume < MIN_VOLUME:
