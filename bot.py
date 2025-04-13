@@ -20,6 +20,11 @@ MIN_VOLUME = 2000
 CHECK_INTERVAL = 60
 NETWORK = "bsc"
 
+print("ENV DEBUG:")
+print("TOKEN:", os.getenv("TELEGRAM_BOT_TOKEN"))
+print("ADMIN_ID:", os.getenv("TELEGRAM_ADMIN_ID"))
+print("CREDS:", os.getenv("GOOGLE_CREDS")[:30])  # только начало
+
 # --- Проверка переменных окружения ---
 missing_env = []
 if not API_TOKEN:
