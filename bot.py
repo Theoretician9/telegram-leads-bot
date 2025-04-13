@@ -4,6 +4,8 @@ from aiogram.types import Message
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+import os
+import json
 
 # 🔐 Токен Telegram-бота от @BotFather
 API_TOKEN = '7856781434:AAEhmSaFGEPVigjqEL8_zLobuVMJp9dHBSg'
@@ -14,8 +16,6 @@ scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)import os
-import json
 
 creds_dict = json.loads(os.environ["GOOGLE_CREDS"])
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -29,12 +29,10 @@ worksheet = sheet.sheet1
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# Команда /start
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: Message):
     await message.reply("Привет! Чтобы добавить запись в трекер, используй:\n\n`/add Токен | Причина входа | Потенциал`\n\nПример:\n`/add BONK | памп китов | x10`", parse_mode="Markdown")
 
-# Команда /add
 @dp.message_handler(commands=['add'])
 async def add_entry(message: Message):
     try:
@@ -52,13 +50,13 @@ async def add_entry(message: Message):
         row_number = len(values) + 1
 
         new_row = [
-            row_number - 1,       # №
-            token_name,           # Название токена
-            today,                # Дата входа
-            reason,               # Причина входа
-            10,                   # Сумма входа ($)
-            potential,            # Потенциал (x)
-            "", "", "", ""        # Остальные поля
+            row_number - 1,
+            token_name,
+            today,
+            reason,
+            10,
+            potential,
+            "", "", "", ""
         ]
 
         worksheet.append_row(new_row)
