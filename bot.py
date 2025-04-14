@@ -46,13 +46,12 @@ creds_dict = json.loads(creds_raw)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_url(SPREADSHEET_URL).sheet1
-log_sheet = client.open_by_url(SPREADSHEET_URL).get_worksheet(1)  # Вторая вкладка под лог
+log_sheet = client.open_by_url(SPREADSHEET_URL).get_worksheet(1)
 
 # --- Telegram Bot ---
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# --- Хранилище уже проверенных токенов ---
 sent_tokens = set()
 pending_tokens = {}
 
@@ -122,10 +121,9 @@ async def check_volume():
     for key in expired:
         del pending_tokens[key]
 
-# --- Отправка уведомления с кнопками ---
+# --- Отправка уведомления ---
 async def send_token_alert(pool, token_info):
     attributes = pool.get('attributes', {})
-
     token_name = token_info['name']
     symbol = token_info['symbol']
     token_address = token_info['address']
@@ -163,7 +161,12 @@ async def periodic_checker():
             try:
                 attributes = pool['attributes']
                 liquidity = float(attributes['reserve_in_usd'] or 0)
-                token_id = attributes['base_token']['id']
+
+                base_token = attributes.get('base_token')
+                if not base_token or 'id' not in base_token:
+                    continue
+                token_id = base_token['id']
+
                 token_info = extract_token_info(token_id, included)
                 token_address = token_info['address']
                 key = pool['id']
@@ -184,29 +187,12 @@ async def periodic_checker():
         await check_volume()
         await asyncio.sleep(CHECK_INTERVAL)
 
-# --- Обработка нажатий кнопок ---
-@dp.callback_query_handler(lambda c: c.data.startswith("track|"))
-async def handle_track(call: types.CallbackQuery):
-    token_id = call.data.split("|")[1]
-    await call.answer("Добавлено в трекер")
-    pool_url = f"https://www.geckoterminal.com/{NETWORK}/pools/{token_id.split('_')[-1]}"
-    now = datetime.now().strftime('%Y-%m-%d')
-    new_row = ["auto", f"{token_id}", now, "auto-lister", 10, "x10", "", "", "", pool_url]
-    sheet.append_row(new_row)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("analyze|"))
-async def handle_analyze(call: types.CallbackQuery):
-    await call.answer("Скоро добавим анализ \U0001F6A7", show_alert=True)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("contract|"))
-async def handle_contract(call: types.CallbackQuery):
-    await call.answer("Скоро добавим проверку контракта ⚠️", show_alert=True)
-
-# --- Старт ---
+# --- Telegram команды ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     await message.answer("Бот запущен. Жду новые листинги...")
 
+# --- Main ---
 async def main():
     asyncio.create_task(periodic_checker())
     await dp.start_polling()
