@@ -113,6 +113,7 @@ async def check_volume():
 # --- Отправка уведомления с кнопками ---
 async def send_token_alert(pool):
     attributes = pool.get('attributes', {})
+    token_data = pool.get('relationships', {}).get('base_token', {}).get('data', {})
     base_token = attributes.get('base_token', {})
 
     token_name = base_token.get('name', 'Unknown')
