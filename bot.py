@@ -83,6 +83,19 @@ def extract_token_info(token_id, included):
             }
     return {'name': 'Unknown', 'symbol': '?', 'address': 'unknown'}
 
+def extract_quote_token_info(pool, included):
+    quote_id = pool.get('relationships', {}).get('quote_token', {}).get('data', {}).get('id')
+    if not quote_id:
+        return {'name': 'Unknown', 'symbol': '?'}
+    for entry in included:
+        if entry['id'] == quote_id and entry['type'] == 'token':
+            attrs = entry.get('attributes', {})
+            return {
+                'name': attrs.get('name') or 'Unknown',
+                'symbol': attrs.get('symbol') or '?'
+            }
+    return {'name': 'Unknown', 'symbol': '?'}
+
 # --- Получение имени биржи ---
 def extract_dex_name(pool, included):
     dex_id = pool.get('relationships', {}).get('dex', {}).get('data', {}).get('id')
@@ -172,22 +185,23 @@ async def periodic_checker():
                         continue
 
                     token_info = extract_token_info(token_id, included)
+                    quote_info = extract_quote_token_info(pool, included)
                     token_address = token_info['address']
                     key = pool['id']
 
                     is_new = token_address and await is_new_token(network, token_address)
                     if is_new:
                         passed_new += 1
-
-                    log_sheet.append_row([
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        token_info['name'], token_info['symbol'],
-                        liquidity,
-                        attributes.get('volume_usd', {}).get('h1', 0),
-                        "NEW" if is_new else "OLD",
-                        token_address,
-                        extract_dex_name(pool, included)
-                    ])
+                        log_sheet.append_row([
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            token_info['name'], token_info['symbol'],
+                            quote_info['name'], quote_info['symbol'],
+                            liquidity,
+                            attributes.get('volume_usd', {}).get('h1', 0),
+                            "NEW",
+                            token_address,
+                            extract_dex_name(pool, included)
+                        ])
 
                 except Exception as e:
                     print(f"[ERROR] {network} pair check:", e)
