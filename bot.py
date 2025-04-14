@@ -18,7 +18,13 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1HiPi8UX_ekCHVDXdRxHwD
 MIN_LIQUIDITY = 5000
 MIN_VOLUME = 2000
 CHECK_INTERVAL = 20
-NETWORKS = ["bsc", "eth", "polygon", "arbitrum", "base"]
+NETWORKS = [
+    ("bsc", "bsc"),
+    ("eth", "eth"),
+    ("polygon", "polygon_pos"),
+    ("arbitrum", "arbitrum"),
+    ("base", "base")
+]
 SCAN_KEYS = {
     "bsc": os.getenv("BSCSCAN_API_KEY"),
     "eth": os.getenv("ETHERSCAN_API_KEY"),
@@ -38,16 +44,9 @@ admin_id = os.getenv('TELEGRAM_ADMIN_ID')
 if not admin_id:
     missing_env.append("TELEGRAM_ADMIN_ID")
 
-expected_vars = {
-    "BSCSCAN_API_KEY": SCAN_KEYS["bsc"],
-    "ETHERSCAN_API_KEY": SCAN_KEYS["eth"],
-    "POLYGONSCAN_API_KEY": SCAN_KEYS["polygon"],
-    "ARBISCAN_API_KEY": SCAN_KEYS["arbitrum"],
-    "BASESCAN_API_KEY": SCAN_KEYS["base"]
-}
-for var, value in expected_vars.items():
+for key, value in SCAN_KEYS.items():
     if not value:
-        missing_env.append(var)
+        missing_env.append(f"{key.upper()}SCAN_API_KEY")
 
 if missing_env:
     raise EnvironmentError(f"Missing environment variable(s): {', '.join(missing_env)}")
@@ -68,7 +67,7 @@ log_sheet = client.open_by_url(SPREADSHEET_URL).get_worksheet(1)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-sent_tokens = {net: set() for net in NETWORKS}
+sent_tokens = {net[0]: set() for net in NETWORKS}
 seen_pool_ids = set()
 
 # --- Поиск информации о токене в included ---
@@ -130,22 +129,21 @@ async def is_new_token(network, token_address):
     return False
 
 # --- Получение пар с GeckoTerminal ---
-async def fetch_new_pairs(network):
-    url = f"https://api.geckoterminal.com/api/v2/networks/{network}/pools"
+async def fetch_new_pairs(label, network_id):
+    url = f"https://api.geckoterminal.com/api/v2/networks/{network_id}/pools"
     params = {
-        "include": "base_token,quote_token,dex",
-        "page[size]": 100
+        "include": "base_token,quote_token,dex"
     }
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, ssl=ssl.create_default_context()) as resp:
                 if resp.status != 200:
-                    print(f"[ERROR] {network} HTTP {resp.status}: {await resp.text()}")
+                    print(f"[ERROR] {label} HTTP {resp.status}: {await resp.text()}")
                     return [], []
                 data = await resp.json()
                 return data.get("data", []), data.get("included", [])
     except Exception as e:
-        print(f"[ERROR] fetch_new_pairs ({network}):", e)
+        print(f"[ERROR] fetch_new_pairs ({label}):", e)
         return [], []
 
 # --- Отладочная информация ---
@@ -155,9 +153,9 @@ async def debug_stats(network, total, passed_liquidity, passed_new):
 # --- Периодическая проверка ---
 async def periodic_checker():
     while True:
-        for network in NETWORKS:
-            pools, included = await fetch_new_pairs(network)
-            await asyncio.sleep(1.5)  # Пауза между запросами к разным сетям
+        for label, network_id in NETWORKS:
+            pools, included = await fetch_new_pairs(label, network_id)
+            await asyncio.sleep(1.5)
 
             now = datetime.utcnow()
             total = len(pools)
@@ -185,7 +183,7 @@ async def periodic_checker():
                     token_info = extract_token_info(token_id, included)
                     token_address = token_info['address']
 
-                    is_new = token_address and await is_new_token(network, token_address)
+                    is_new = token_address and await is_new_token(label, token_address)
                     if is_new:
                         passed_new += 1
 
@@ -200,9 +198,9 @@ async def periodic_checker():
                     ])
 
                 except Exception as e:
-                    print(f"[ERROR] {network} pair check:", e)
+                    print(f"[ERROR] {label} pair check:", e)
 
-            await debug_stats(network, total, passed_liquidity, passed_new)
+            await debug_stats(label, total, passed_liquidity, passed_new)
         await asyncio.sleep(CHECK_INTERVAL)
 
 # --- Telegram команды ---
