@@ -173,16 +173,13 @@ async def send_token_alert(network, pool, token_info, quote_info, dex_name):
         return
     sent_tokens[network].add(key)
 
-    text = f"\U0001F539 <b>Новая пара:</b> {token_name} (${symbol}) / {quote_name} (${quote_symbol})
-" \
-           f"
-\U0001F4B0 <b>Ликвидность:</b> ${int(liquidity):,}" \
-           f"
-\U0001F4CA <b>Объём (1ч):</b> ${int(volume):,}" \
-           f"
-\U0001F3E2 <b>Биржа:</b> {dex_name}" \
-           f"
-\U0001F517 <a href='{gecko_url}'>GeckoTerminal</a> | <a href='{dex_url}'>DexScreener</a> | <a href='{pancake_url}'>PancakeSwap</a>"
+    text = (
+        f"\U0001F539 <b>Новая пара:</b> {token_name} (${symbol}) / {quote_name} (${quote_symbol})\n"
+        f"\U0001F4B0 <b>Ликвидность:</b> ${int(liquidity):,}\n"
+        f"\U0001F4CA <b>Объём (1ч):</b> ${int(volume):,}\n"
+        f"\U0001F3E2 <b>Биржа:</b> {dex_name}\n"
+        f"\U0001F517 <a href='{gecko_url}'>GeckoTerminal</a> | <a href='{dex_url}'>DexScreener</a> | <a href='{pancake_url}'>PancakeSwap</a>"
+    )
 
     await bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML")
 
