@@ -56,6 +56,18 @@ dp = Dispatcher(bot)
 sent_tokens = set()
 pending_tokens = {}
 
+# --- Поиск информации о токене в included ---
+def extract_token_info(token_id, included):
+    for entry in included:
+        if entry['id'] == token_id and entry['type'] == 'token':
+            attrs = entry.get('attributes', {})
+            return {
+                'name': attrs.get('name') or 'Unknown',
+                'symbol': attrs.get('symbol') or '?',
+                'address': attrs.get('address') or 'unknown'
+            }
+    return {'name': 'Unknown', 'symbol': '?', 'address': 'unknown'}
+
 # --- Проверка возраста токена через BscScan ---
 async def is_new_token(token_address):
     try:
@@ -88,10 +100,10 @@ async def fetch_new_pairs():
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, ssl=ssl.create_default_context()) as resp:
                 data = await resp.json()
-                return data.get("data", [])
+                return data.get("data", []), data.get("included", [])
     except Exception as e:
         print("[ERROR] fetch_new_pairs:", e)
-        return []
+        return [], []
 
 # --- Проверка торгового объёма ---
 async def check_volume():
@@ -105,19 +117,18 @@ async def check_volume():
 
         volume = float(pool['data']['attributes']['volume_usd']['h1'] or 0)
         if volume >= MIN_VOLUME:
-            await send_token_alert(pool['data'])
+            await send_token_alert(pool['data'], pool['token_info'])
             expired.append(key)
     for key in expired:
         del pending_tokens[key]
 
 # --- Отправка уведомления с кнопками ---
-async def send_token_alert(pool):
+async def send_token_alert(pool, token_info):
     attributes = pool.get('attributes', {})
-    base_token_data = attributes.get('base_token', {})
 
-    token_name = base_token_data.get('name') or 'Unknown'
-    symbol = base_token_data.get('symbol') or '?'
-    token_address = base_token_data.get('address') or 'unknown'
+    token_name = token_info['name']
+    symbol = token_info['symbol']
+    token_address = token_info['address']
 
     liquidity = float(attributes.get('reserve_in_usd', 0) or 0)
     volume = float(attributes.get('volume_usd', {}).get('h1', 0) or 0)
@@ -146,21 +157,20 @@ async def send_token_alert(pool):
 # --- Периодическая проверка ---
 async def periodic_checker():
     while True:
-        pools = await fetch_new_pairs()
+        pools, included = await fetch_new_pairs()
         now = datetime.utcnow()
         for pool in pools:
             try:
                 attributes = pool['attributes']
                 liquidity = float(attributes['reserve_in_usd'] or 0)
-                base_token_data = attributes.get('base_token', {})
-                token_name = base_token_data.get('name') or 'Unknown'
-                symbol = base_token_data.get('symbol') or '?'
-                token_address = base_token_data.get('address')
+                token_id = attributes['base_token']['id']
+                token_info = extract_token_info(token_id, included)
+                token_address = token_info['address']
                 key = pool['id']
 
                 log_sheet.append_row([
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    token_name, symbol,
+                    token_info['name'], token_info['symbol'],
                     liquidity,
                     attributes.get('volume_usd', {}).get('h1', 0),
                     "NEW" if token_address and await is_new_token(token_address) else "OLD"
@@ -168,7 +178,7 @@ async def periodic_checker():
 
                 if liquidity >= MIN_LIQUIDITY and key not in pending_tokens and key not in sent_tokens:
                     if token_address and await is_new_token(token_address):
-                        pending_tokens[key] = {'data': pool, 'timestamp': now}
+                        pending_tokens[key] = {'data': pool, 'timestamp': now, 'token_info': token_info}
             except Exception as e:
                 print("[ERROR] during liquidity/new token check:", e)
         await check_volume()
