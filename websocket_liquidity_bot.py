@@ -48,6 +48,14 @@ def log_to_sheet(network, address, event_type):
     except Exception as e:
         print(f"[ERROR] Writing to sheet: {e}")
 
+async def cleanup_pending_tokens():
+    while True:
+        now = datetime.utcnow()
+        expired = [token for token, ts in pending_tokens.items() if now - ts > timedelta(minutes=180)]
+        for token in expired:
+            del pending_tokens[token]
+        await asyncio.sleep(300)
+
 async def process_event(network, event):
     try:
         tx = json.loads(event["params"]["result"])
@@ -70,12 +78,11 @@ async def process_event(network, event):
 
             # Check for deployment match
             for pending_token, timestamp in list(pending_tokens.items()):
-                if datetime.utcnow() - timestamp < timedelta(minutes=30):
-                    if pending_token.lower() in input_data.lower():
-                        print(f"[{network.upper()}] 🔥 NEW LISTING DETECTED: {pending_token}")
-                        log_to_sheet(network, pending_token, "NEW LISTING")
-                        await send_alert(f"[{network.upper()}] 🔥 NEW LISTING\n{pending_token}")
-                        del pending_tokens[pending_token]
+                if pending_token.lower() in input_data.lower():
+                    print(f"[{network.upper()}] 🔥 NEW LISTING DETECTED: {pending_token}")
+                    log_to_sheet(network, pending_token, "NEW LISTING")
+                    await send_alert(f"[{network.upper()}] 🔥 NEW LISTING\n{pending_token}")
+                    del pending_tokens[pending_token]
 
     except Exception as e:
         print(f"[ERROR] processing {network}: {e}")
@@ -101,6 +108,7 @@ async def listen_to_network(network, url):
 
 async def main():
     tasks = [listen_to_network(net, url) for net, url in wss_urls.items() if url]
+    tasks.append(cleanup_pending_tokens())
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
