@@ -162,10 +162,9 @@ async def periodic_checker():
                 attributes = pool['attributes']
                 liquidity = float(attributes['reserve_in_usd'] or 0)
 
-                base_token = attributes.get('base_token')
-                if not base_token or 'id' not in base_token:
+                token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
+                if not token_id:
                     continue
-                token_id = base_token['id']
 
                 token_info = extract_token_info(token_id, included)
                 token_address = token_info['address']
