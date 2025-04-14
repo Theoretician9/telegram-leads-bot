@@ -70,7 +70,6 @@ dp = Dispatcher(bot)
 sent_tokens = {net[0]: set() for net in NETWORKS}
 seen_pool_ids = set()
 
-# --- Поиск информации о токене в included ---
 def extract_token_info(token_id, included):
     for entry in included:
         if entry['id'] == token_id and entry['type'] == 'token':
@@ -82,7 +81,6 @@ def extract_token_info(token_id, included):
             }
     return {'name': 'Unknown', 'symbol': '?', 'address': 'unknown'}
 
-# --- Получение имени биржи ---
 def extract_dex_name(pool, included):
     dex_id = pool.get('relationships', {}).get('dex', {}).get('data', {}).get('id')
     if not dex_id:
@@ -92,7 +90,6 @@ def extract_dex_name(pool, included):
             return entry.get('attributes', {}).get('name', 'Unknown')
     return "Unknown"
 
-# --- Проверка возраста токена через Scan ---
 async def is_new_token(network, token_address):
     try:
         key = SCAN_KEYS.get(network)
@@ -128,11 +125,11 @@ async def is_new_token(network, token_address):
         print(f"[ERROR] {network} Scan contract age check:", e)
     return False
 
-# --- Получение пар с GeckoTerminal ---
 async def fetch_new_pairs(label, network_id):
     url = f"https://api.geckoterminal.com/api/v2/networks/{network_id}/pools"
     params = {
-        "include": "base_token,quote_token,dex"
+        "include": "base_token,quote_token,dex",
+        "per_page": 100
     }
     try:
         async with aiohttp.ClientSession() as session:
@@ -146,11 +143,9 @@ async def fetch_new_pairs(label, network_id):
         print(f"[ERROR] fetch_new_pairs ({label}):", e)
         return [], []
 
-# --- Отладочная информация ---
 async def debug_stats(network, total, passed_liquidity, passed_new):
     print(f"[{network.upper()}] Total pairs: {total}, Passed liquidity: {passed_liquidity}, New: {passed_new}")
 
-# --- Периодическая проверка ---
 async def periodic_checker():
     while True:
         for label, network_id in NETWORKS:
@@ -176,24 +171,26 @@ async def periodic_checker():
 
                     passed_liquidity += 1
 
-                    token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
-                    if not token_id:
+                    base_token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
+                    quote_token_id = pool.get('relationships', {}).get('quote_token', {}).get('data', {}).get('id')
+                    if not base_token_id or not quote_token_id:
                         continue
 
-                    token_info = extract_token_info(token_id, included)
-                    token_address = token_info['address']
+                    base_info = extract_token_info(base_token_id, included)
+                    quote_info = extract_token_info(quote_token_id, included)
 
-                    is_new = token_address and await is_new_token(label, token_address)
+                    is_new = base_info['address'] and await is_new_token(label, base_info['address'])
                     if is_new:
                         passed_new += 1
 
                     log_sheet.append_row([
                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        token_info['name'], token_info['symbol'],
+                        base_info['name'], base_info['symbol'],
+                        quote_info['name'], quote_info['symbol'],
                         liquidity,
                         attributes.get('volume_usd', {}).get('h1', 0),
                         "NEW" if is_new else "OLD",
-                        token_address,
+                        base_info['address'],
                         extract_dex_name(pool, included)
                     ])
 
@@ -203,12 +200,10 @@ async def periodic_checker():
             await debug_stats(label, total, passed_liquidity, passed_new)
         await asyncio.sleep(CHECK_INTERVAL)
 
-# --- Telegram команды ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     await message.answer("Бот запущен. Жду новые листинги...")
 
-# --- Main ---
 async def main():
     asyncio.create_task(periodic_checker())
     await dp.start_polling()
