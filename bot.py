@@ -70,6 +70,7 @@ dp = Dispatcher(bot)
 sent_tokens = {net[0]: set() for net in NETWORKS}
 seen_pool_ids = set()
 
+# --- Вспомогательные функции ---
 def extract_token_info(token_id, included):
     for entry in included:
         if entry['id'] == token_id and entry['type'] == 'token':
@@ -125,11 +126,11 @@ async def is_new_token(network, token_address):
         print(f"[ERROR] {network} Scan contract age check:", e)
     return False
 
-async def fetch_new_pairs(label, network_id):
+async def fetch_new_pairs(label, network_id, limit=50):
     url = f"https://api.geckoterminal.com/api/v2/networks/{network_id}/pools"
     params = {
         "include": "base_token,quote_token,dex",
-        "per_page": 100
+        "per_page": limit
     }
     try:
         async with aiohttp.ClientSession() as session:
@@ -148,9 +149,9 @@ async def debug_stats(network, total, passed_liquidity, passed_new):
 
 async def periodic_checker():
     while True:
-        for label, network_id in NETWORKS:
-            pools, included = await fetch_new_pairs(label, network_id)
-            await asyncio.sleep(1.5)
+        for idx, (label, network_id) in enumerate(NETWORKS):
+            pools, included = await fetch_new_pairs(label, network_id, limit=50)
+            await asyncio.sleep(1.5 + idx * 0.7)  # разнесённые интервалы
 
             now = datetime.utcnow()
             total = len(pools)
@@ -183,17 +184,16 @@ async def periodic_checker():
                     if is_new:
                         passed_new += 1
 
-                    log_sheet.append_row([
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        base_info['name'], base_info['symbol'],
-                        quote_info['name'], quote_info['symbol'],
-                        liquidity,
-                        attributes.get('volume_usd', {}).get('h1', 0),
-                        "NEW" if is_new else "OLD",
-                        base_info['address'],
-                        extract_dex_name(pool, included)
-                    ])
-
+                        log_sheet.append_row([
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            base_info['name'], base_info['symbol'],
+                            quote_info['name'], quote_info['symbol'],
+                            liquidity,
+                            attributes.get('volume_usd', {}).get('h1', 0),
+                            "NEW",
+                            base_info['address'],
+                            extract_dex_name(pool, included)
+                        ])
                 except Exception as e:
                     print(f"[ERROR] {label} pair check:", e)
 
