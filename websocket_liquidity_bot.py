@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import aiohttp
 from dotenv import load_dotenv
 import os
+from aiogram import Bot
 
 load_dotenv()
 
@@ -27,6 +28,11 @@ DEX_ADDRESSES = {
     'arbitrum': [],
     'base': []
 }
+
+# Telegram уведомления
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+bot = Bot(token=BOT_TOKEN)
 
 # Временное хранилище новых токенов и pending токенов
 new_tokens = {}
@@ -53,6 +59,15 @@ def cleanup_pending():
         del pending_tokens[addr]
 
 
+async def send_telegram(text):
+    if not BOT_TOKEN or not CHAT_ID:
+        return
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=text)
+    except Exception as e:
+        print(f"[TELEGRAM ERROR] {e}")
+
+
 async def handle_event(chain, tx):
     from_address = tx['from']
     to_address = tx.get('to')
@@ -71,6 +86,7 @@ async def handle_event(chain, tx):
         from_lower = from_address.lower()
         if from_lower in pending_tokens:
             print(f"[{chain.upper()}] 📣 NEW LISTING: {from_address} to DEX: {to_address}")
+            await send_telegram(f"[{chain.upper()}] 📣 NEW LISTING\nToken: {from_address}\nDEX: {to_address}")
             del pending_tokens[from_lower]
         elif is_recent(from_lower):
             print(f"[{chain.upper()}] ✅ NEW LISTING EVENT! Token: {from_address} to DEX: {to_address}")
