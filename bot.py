@@ -55,7 +55,6 @@ dp = Dispatcher(bot)
 # --- Хранилище уже проверенных токенов ---
 sent_tokens = set()
 pending_tokens = {}
-token_metadata = {}
 
 # --- Проверка возраста токена через BscScan ---
 async def is_new_token(token_address):
@@ -89,18 +88,6 @@ async def fetch_new_pairs():
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, ssl=ssl.create_default_context()) as resp:
                 data = await resp.json()
-                included = data.get("included", [])
-                # построить мапу по токенам
-                global token_metadata
-                token_metadata = {}
-                for token in included:
-                    if token['type'] == 'token':
-                        tid = token['id']
-                        token_metadata[tid] = {
-                            'name': token['attributes'].get('name', 'Unknown'),
-                            'symbol': token['attributes'].get('symbol', '?'),
-                            'address': token['attributes'].get('address', '')
-                        }
                 return data.get("data", [])
     except Exception as e:
         print("[ERROR] fetch_new_pairs:", e)
@@ -126,12 +113,11 @@ async def check_volume():
 # --- Отправка уведомления с кнопками ---
 async def send_token_alert(pool):
     attributes = pool.get('attributes', {})
-    base_token_ref = attributes.get('base_token', {}).get('id')
-    token_info = token_metadata.get(base_token_ref, {})
+    base_token = attributes.get('base_token', {})
 
-    token_name = token_info.get('name', 'Unknown')
-    symbol = token_info.get('symbol', '?')
-    token_address = token_info.get('address', 'unknown')
+    token_name = base_token.get('name', 'Unknown')
+    symbol = base_token.get('symbol', '?')
+    token_address = base_token.get('address', 'unknown')
     liquidity = float(attributes.get('reserve_in_usd', 0) or 0)
     volume = float(attributes.get('volume_usd', {}).get('h1', 0) or 0)
     pool_id = pool.get('id', 'unknown').split('_')[-1]
@@ -165,11 +151,10 @@ async def periodic_checker():
             try:
                 attributes = pool['attributes']
                 liquidity = float(attributes['reserve_in_usd'] or 0)
-                base_token_ref = attributes.get('base_token', {}).get('id')
-                token_info = token_metadata.get(base_token_ref, {})
-                token_name = token_info.get('name', 'Unknown')
-                symbol = token_info.get('symbol', '?')
-                token_address = token_info.get('address')
+                base_token = attributes.get('base_token', {})
+                token_name = base_token.get('name', 'Unknown')
+                symbol = base_token.get('symbol', '?')
+                token_address = base_token.get('address')
                 key = pool['id']
 
                 log_sheet.append_row([
