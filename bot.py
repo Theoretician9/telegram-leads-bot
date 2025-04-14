@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import aiohttp
 import gspread
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from oauth2client.service_account import ServiceAccountCredentials
 
 # --- Константы ---
@@ -130,7 +129,8 @@ async def fetch_new_pairs(label, network_id, limit=50):
     url = f"https://api.geckoterminal.com/api/v2/networks/{network_id}/pools"
     params = {
         "include": "base_token,quote_token,dex",
-        "per_page": limit
+        "per_page": limit,
+        "page": 1
     }
     try:
         async with aiohttp.ClientSession() as session:
@@ -151,7 +151,7 @@ async def periodic_checker():
     while True:
         for idx, (label, network_id) in enumerate(NETWORKS):
             pools, included = await fetch_new_pairs(label, network_id, limit=50)
-            await asyncio.sleep(1.5 + idx * 0.7)  # разнесённые интервалы
+            await asyncio.sleep(1.5 + idx * 0.7)
 
             now = datetime.utcnow()
             total = len(pools)
@@ -169,7 +169,6 @@ async def periodic_checker():
                     liquidity = float(attributes['reserve_in_usd'] or 0)
                     if liquidity < MIN_LIQUIDITY:
                         continue
-
                     passed_liquidity += 1
 
                     base_token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
