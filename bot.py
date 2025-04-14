@@ -19,6 +19,7 @@ MIN_LIQUIDITY = 5000
 MIN_VOLUME = 2000
 CHECK_INTERVAL = 20
 NETWORK = "bsc"
+BSCSCAN_API_KEY = os.getenv('BSCSCAN_API_KEY')
 
 # --- Проверка переменных окружения ---
 missing_env = []
@@ -30,6 +31,8 @@ if not creds_raw:
 admin_id = os.getenv('TELEGRAM_ADMIN_ID')
 if not admin_id:
     missing_env.append("TELEGRAM_ADMIN_ID")
+if not BSCSCAN_API_KEY:
+    missing_env.append("BSCSCAN_API_KEY")
 if missing_env:
     raise EnvironmentError(f"Missing environment variable(s): {', '.join(missing_env)}")
 
@@ -52,6 +55,30 @@ dp = Dispatcher(bot)
 # --- Хранилище уже проверенных токенов ---
 sent_tokens = set()
 pending_tokens = {}
+
+# --- Проверка возраста токена через BscScan ---
+async def is_new_token(token_address):
+    try:
+        url = f"https://api.bscscan.com/api"
+        params = {
+            "module": "contract",
+            "action": "getcontractcreation",
+            "contractaddresses": token_address,
+            "apikey": BSCSCAN_API_KEY
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params) as resp:
+                data = await resp.json()
+                result = data.get("result", [])
+                if not result:
+                    return False
+                first_tx = result[0].get("timeStamp")
+                if first_tx:
+                    created_time = datetime.utcfromtimestamp(int(first_tx))
+                    return (datetime.utcnow() - created_time) < timedelta(hours=24)
+    except Exception as e:
+        print("[ERROR] BscScan contract age check:", e)
+    return False
 
 # --- Парсинг новых пар с GeckoTerminal ---
 async def fetch_new_pairs():
@@ -122,12 +149,17 @@ async def periodic_checker():
         now = datetime.utcnow()
         for pool in pools:
             try:
-                liquidity = float(pool['attributes']['reserve_in_usd'] or 0)
+                attributes = pool['attributes']
+                liquidity = float(attributes['reserve_in_usd'] or 0)
+                base_token = attributes.get('base_token', {})
+                token_address = base_token.get('address')
                 key = pool['id']
+
                 if liquidity >= MIN_LIQUIDITY and key not in pending_tokens and key not in sent_tokens:
-                    pending_tokens[key] = {'data': pool, 'timestamp': now}
+                    if token_address and await is_new_token(token_address):
+                        pending_tokens[key] = {'data': pool, 'timestamp': now}
             except Exception as e:
-                print("[ERROR] during liquidity check:", e)
+                print("[ERROR] during liquidity/new token check:", e)
         await check_volume()
         await asyncio.sleep(CHECK_INTERVAL)
 
