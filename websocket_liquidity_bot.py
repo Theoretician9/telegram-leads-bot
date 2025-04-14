@@ -93,7 +93,7 @@ async def handle_event(chain, tx):
 async def listen(chain, url):
     while True:
         try:
-            async with websockets.connect(url, ping_interval=30, ping_timeout=10) as ws:
+            async with websockets.connect(url, ping_interval=60, ping_timeout=20, max_queue=None) as ws:
                 subscribe = {
                     "jsonrpc": "2.0",
                     "id": 1,
@@ -121,8 +121,8 @@ async def listen(chain, url):
                                     if tx:
                                         await handle_event(chain, tx)
                     except Exception as inner_e:
-                        print(f"[{chain.upper()}] Inner error: {inner_e}")
-                        await asyncio.sleep(2)
+                        print(f"[{chain.upper()}] ⚠️ Inner error: {type(inner_e).__name__}: {inner_e}")
+                        await asyncio.sleep(3)
         except Exception as outer_e:
             print(f"[{chain.upper()}] Reconnecting due to error: {outer_e}")
             await asyncio.sleep(10)
