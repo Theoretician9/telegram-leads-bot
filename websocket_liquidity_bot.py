@@ -86,7 +86,9 @@ async def handle_event(chain, tx):
         from_lower = from_address.lower()
         if from_lower in pending_tokens:
             print(f"[{chain.upper()}] 📣 NEW LISTING: {from_address} to DEX: {to_address}")
-            await send_telegram(f"[{chain.upper()}] 📣 NEW LISTING\nToken: {from_address}\nDEX: {to_address}")
+            await send_telegram(f"[{chain.upper()}] 📣 *NEW LISTING!*
+Token: `{from_address}`
+DEX: `{to_address}`",)
             del pending_tokens[from_lower]
         elif is_recent(from_lower):
             print(f"[{chain.upper()}] ✅ NEW LISTING EVENT! Token: {from_address} to DEX: {to_address}")
