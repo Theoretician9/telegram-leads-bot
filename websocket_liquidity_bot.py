@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import aiohttp
 import websockets
@@ -31,7 +31,6 @@ wss_urls = {
     'polygon': os.getenv("POLYGON_WSS")
 }
 
-pending_tokens = {}
 checked_liquidity = set()
 
 async def send_alert(msg: str):
@@ -48,14 +47,6 @@ def log_to_sheet(network, address, event_type):
     except Exception as e:
         print(f"[ERROR] Writing to sheet: {e}")
 
-async def cleanup_pending_tokens():
-    while True:
-        now = datetime.utcnow()
-        expired = [token for token, ts in pending_tokens.items() if now - ts > timedelta(minutes=180)]
-        for token in expired:
-            del pending_tokens[token]
-        await asyncio.sleep(300)
-
 async def process_event(network, event):
     try:
         tx = json.loads(event["params"]["result"])
@@ -65,7 +56,6 @@ async def process_event(network, event):
         if input_data.startswith("0x60806040"):
             token_address = tx["hash"][-40:]
             print(f"[{network.upper()}] 🚀 POSSIBLE TOKEN DEPLOYMENT: {token_address}")
-            pending_tokens[token_address] = datetime.utcnow()
             log_to_sheet(network, token_address, "DEPLOY")
 
         elif input_data.startswith("0xf305d719") or input_data.startswith("0xe8e33700"):
@@ -75,14 +65,6 @@ async def process_event(network, event):
             checked_liquidity.add(token_address)
             print(f"[{network.upper()}] 💧 POSSIBLE LIQUIDITY EVENT: {tx['hash']} → {token_address}")
             log_to_sheet(network, token_address, "LIQUIDITY")
-
-            # Check for deployment match
-            for pending_token, timestamp in list(pending_tokens.items()):
-                if pending_token.lower() in input_data.lower():
-                    print(f"[{network.upper()}] 🔥 NEW LISTING DETECTED: {pending_token}")
-                    log_to_sheet(network, pending_token, "NEW LISTING")
-                    await send_alert(f"[{network.upper()}] 🔥 NEW LISTING\n{pending_token}")
-                    del pending_tokens[pending_token]
 
     except Exception as e:
         print(f"[ERROR] processing {network}: {e}")
@@ -108,7 +90,6 @@ async def listen_to_network(network, url):
 
 async def main():
     tasks = [listen_to_network(net, url) for net, url in wss_urls.items() if url]
-    tasks.append(cleanup_pending_tokens())
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
