@@ -139,6 +139,9 @@ async def fetch_new_pairs(network):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, ssl=ssl.create_default_context()) as resp:
+                if resp.status != 200:
+                    print(f"[ERROR] {network} HTTP {resp.status}: {await resp.text()}")
+                    return [], []
                 data = await resp.json()
                 return data.get("data", []), data.get("included", [])
     except Exception as e:
@@ -154,8 +157,9 @@ async def periodic_checker():
     while True:
         for network in NETWORKS:
             pools, included = await fetch_new_pairs(network)
-            now = datetime.utcnow()
+            await asyncio.sleep(1.5)  # Пауза между запросами к разным сетям
 
+            now = datetime.utcnow()
             total = len(pools)
             passed_liquidity = 0
             passed_new = 0
@@ -169,7 +173,6 @@ async def periodic_checker():
 
                     attributes = pool['attributes']
                     liquidity = float(attributes['reserve_in_usd'] or 0)
-
                     if liquidity < MIN_LIQUIDITY:
                         continue
 
