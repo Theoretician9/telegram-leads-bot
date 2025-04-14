@@ -69,7 +69,7 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
 sent_tokens = {net: set() for net in NETWORKS}
-pending_tokens = {net: {} for net in NETWORKS}
+seen_pool_ids = set()
 
 # --- Поиск информации о токене в included ---
 def extract_token_info(token_id, included):
@@ -117,12 +117,9 @@ async def is_new_token(network, token_address):
         }
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params) as resp:
-                try:
-                    data = await resp.json()
-                except Exception:
-                    return False
+                data = await resp.json()
                 result = data.get("result", [])
-                if not isinstance(result, list) or not result:
+                if not result:
                     return False
                 first_tx = result[0].get("timeStamp")
                 if first_tx:
@@ -135,7 +132,10 @@ async def is_new_token(network, token_address):
 # --- Получение пар с GeckoTerminal ---
 async def fetch_new_pairs(network):
     url = f"https://api.geckoterminal.com/api/v2/networks/{network}/pools"
-    params = {"include": "base_token,quote_token,dex"}
+    params = {
+        "include": "base_token,quote_token,dex",
+        "page[size]": 100
+    }
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, ssl=ssl.create_default_context()) as resp:
@@ -162,6 +162,11 @@ async def periodic_checker():
 
             for pool in pools:
                 try:
+                    pool_id = pool['id']
+                    if pool_id in seen_pool_ids:
+                        continue
+                    seen_pool_ids.add(pool_id)
+
                     attributes = pool['attributes']
                     liquidity = float(attributes['reserve_in_usd'] or 0)
 
@@ -171,30 +176,25 @@ async def periodic_checker():
                     passed_liquidity += 1
 
                     token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
-                    quote_id = pool.get('relationships', {}).get('quote_token', {}).get('data', {}).get('id')
-                    if not token_id or not quote_id:
+                    if not token_id:
                         continue
 
                     token_info = extract_token_info(token_id, included)
-                    quote_info = extract_token_info(quote_id, included)
-
                     token_address = token_info['address']
-                    key = pool['id']
 
                     is_new = token_address and await is_new_token(network, token_address)
                     if is_new:
                         passed_new += 1
 
-                        log_sheet.append_row([
-                            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            token_info['name'], token_info['symbol'],
-                            quote_info['name'], quote_info['symbol'],
-                            liquidity,
-                            attributes.get('volume_usd', {}).get('h1', 0),
-                            "NEW",
-                            token_address,
-                            extract_dex_name(pool, included)
-                        ])
+                    log_sheet.append_row([
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        token_info['name'], token_info['symbol'],
+                        liquidity,
+                        attributes.get('volume_usd', {}).get('h1', 0),
+                        "NEW" if is_new else "OLD",
+                        token_address,
+                        extract_dex_name(pool, included)
+                    ])
 
                 except Exception as e:
                     print(f"[ERROR] {network} pair check:", e)
