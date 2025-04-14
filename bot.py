@@ -113,12 +113,13 @@ async def check_volume():
 # --- Отправка уведомления с кнопками ---
 async def send_token_alert(pool):
     attributes = pool.get('attributes', {})
-    token_data = pool.get('relationships', {}).get('base_token', {}).get('data', {})
-    base_token = attributes.get('base_token', {})
+    base_token_data = pool.get('relationships', {}).get('base_token', {}).get('data', {})
+    token_id = base_token_data.get('id', '')
 
-    token_name = base_token.get('name', 'Unknown')
-    symbol = base_token.get('symbol', '?')
-    token_address = base_token.get('address', 'unknown')
+    token_name = attributes.get('base_token', {}).get('name') or 'Unknown'
+    symbol = attributes.get('base_token', {}).get('symbol') or '?'
+    token_address = attributes.get('base_token', {}).get('address') or 'unknown'
+
     liquidity = float(attributes.get('reserve_in_usd', 0) or 0)
     volume = float(attributes.get('volume_usd', {}).get('h1', 0) or 0)
     pool_id = pool.get('id', 'unknown').split('_')[-1]
@@ -152,10 +153,9 @@ async def periodic_checker():
             try:
                 attributes = pool['attributes']
                 liquidity = float(attributes['reserve_in_usd'] or 0)
-                base_token = attributes.get('base_token', {})
-                token_name = base_token.get('name', 'Unknown')
-                symbol = base_token.get('symbol', '?')
-                token_address = base_token.get('address')
+                token_name = attributes.get('base_token', {}).get('name') or 'Unknown'
+                symbol = attributes.get('base_token', {}).get('symbol') or '?'
+                token_address = attributes.get('base_token', {}).get('address')
                 key = pool['id']
 
                 log_sheet.append_row([
