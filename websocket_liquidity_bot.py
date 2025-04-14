@@ -1,96 +1,101 @@
-import asyncio
-import json
-import os
-from datetime import datetime
+# token_alert_bot.py
 
-import aiohttp
+import asyncio
 import websockets
+import json
+from datetime import datetime, timedelta
+import aiohttp
 from dotenv import load_dotenv
-from google.oauth2.service_account import Credentials
-import gspread
-from aiogram import Bot
+import os
 
 load_dotenv()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_ADMIN_ID")
-SPREADSHEET_URL = os.getenv("SPREADSHEET_URL")
-GOOGLE_CREDS = json.loads(os.getenv("GOOGLE_CREDS"))
-
-bot = Bot(token=TELEGRAM_TOKEN)
-
-# Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_info(GOOGLE_CREDS, scopes=scope)
-client = gspread.authorize(creds)
-sheet = client.open_by_url(SPREADSHEET_URL).sheet1
-
-wss_urls = {
-    'bsc': os.getenv("BSC_WSS"),
-    'eth': os.getenv("ETH_WSS"),
-    'polygon': os.getenv("POLYGON_WSS")
+# Подключаемые WSS-ссылки по сетям
+NETWORKS = {
+    'bsc': os.getenv('WSS_BSC'),
+    'eth': os.getenv('WSS_ETH'),
+    'polygon': os.getenv('WSS_POLYGON'),
+    'arbitrum': os.getenv('WSS_ARBITRUM'),
+    'base': os.getenv('WSS_BASE')
 }
 
-checked_liquidity = set()
+# DEX Router адреса для отслеживания ликвидности
+DEX_ADDRESSES = {
+    'bsc': ["0x10ed43c718714eb63d5aa57b78b54704e256024e", "0xc9b085d878e28fa776b1e269595f65726b000039"],
+    'polygon': ["0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff"],
+    'eth': [],
+    'arbitrum': [],
+    'base': []
+}
 
-async def send_alert(msg: str):
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
+# Временное хранилище новых токенов
+new_tokens = {}
 
-def log_to_sheet(network, address, event_type):
-    try:
-        sheet.append_row([
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-            network.upper(),
-            address,
-            event_type
-        ])
-    except Exception as e:
-        print(f"[ERROR] Writing to sheet: {e}")
+def is_recent(address):
+    """Проверка, был ли токен недавно задеплоен"""
+    created = new_tokens.get(address)
+    if not created:
+        return False
+    return (datetime.utcnow() - created).total_seconds() < 600  # 10 минут
 
-async def process_event(network, event):
-    try:
-        tx = json.loads(event["params"]["result"])
-        to = tx.get("to", "")
-        input_data = tx.get("input", "")
+def record_deploy(address):
+    new_tokens[address] = datetime.utcnow()
 
-        if input_data.startswith("0x60806040"):
-            token_address = tx["hash"][-40:]
-            print(f"[{network.upper()}] 🚀 POSSIBLE TOKEN DEPLOYMENT: {token_address}")
-            log_to_sheet(network, token_address, "DEPLOY")
+async def handle_event(chain, tx):
+    from_address = tx['from']
+    to_address = tx.get('to')
 
-        elif input_data.startswith("0xf305d719") or input_data.startswith("0xe8e33700"):
-            token_address = tx["to"]
-            if token_address in checked_liquidity:
-                return
-            checked_liquidity.add(token_address)
-            print(f"[{network.upper()}] 💧 POSSIBLE LIQUIDITY EVENT: {tx['hash']} → {token_address}")
-            log_to_sheet(network, token_address, "LIQUIDITY")
+    # Проверка на создание контракта (деплой)
+    if to_address is None:
+        contract = tx['hash']
+        print(f"[{chain.upper()}] 🚀 POSSIBLE TOKEN DEPLOYMENT: {contract}")
+        record_deploy(contract.lower())
+        return
 
-    except Exception as e:
-        print(f"[ERROR] processing {network}: {e}")
+    # Проверка на добавление ликвидности
+    if to_address.lower() in DEX_ADDRESSES.get(chain, []):
+        if is_recent(from_address.lower()):
+            print(f"[{chain.upper()}] ✅ NEW LISTING EVENT! Token: {from_address} to DEX: {to_address}")
+            # Тут можно будет добавить запись в таблицу / Telegram
+        else:
+            print(f"[{chain.upper()}] 💧 POSSIBLE LIQUIDITY EVENT: {from_address} → {to_address}")
 
-async def listen_to_network(network, url):
-    while True:
-        try:
-            async with websockets.connect(url) as ws:
-                await ws.send(json.dumps({
-                    "method": "eth_subscribe",
-                    "params": ["newPendingTransactions"],
-                    "id": 1,
-                    "jsonrpc": "2.0"
-                }))
-                while True:
-                    message = await ws.recv()
-                    data = json.loads(message)
-                    if "params" in data:
-                        await process_event(network, data)
-        except Exception as e:
-            print(f"[ERROR] {network} listener: {e}")
-            await asyncio.sleep(5)
+async def listen(chain, url):
+    async with websockets.connect(url) as ws:
+        subscribe = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_subscribe",
+            "params": ["newPendingTransactions"]
+        }
+        await ws.send(json.dumps(subscribe))
+        print(f"[{chain.upper()}] Connected to WebSocket")
+
+        while True:
+            try:
+                message = await ws.recv()
+                data = json.loads(message)
+                if 'params' in data:
+                    tx_hash = data['params']['result']
+                    # Получаем данные транзакции
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(NETWORKS[chain].replace('wss://', 'https://'), json={
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "eth_getTransactionByHash",
+                            "params": [tx_hash]
+                        }) as resp:
+                            tx_data = await resp.json()
+                            tx = tx_data.get("result")
+                            if tx:
+                                await handle_event(chain, tx)
+            except Exception as e:
+                print(f"[{chain.upper()}] Error: {e}")
+                await asyncio.sleep(5)
 
 async def main():
-    tasks = [listen_to_network(net, url) for net, url in wss_urls.items() if url]
+    tasks = [listen(chain, url) for chain, url in NETWORKS.items() if url]
     await asyncio.gather(*tasks)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
