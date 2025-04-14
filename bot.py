@@ -129,6 +129,81 @@ async def is_new_token(network, token_address):
         print(f"[ERROR] {network} Scan contract age check:", e)
     return False
 
-# --- Добавим отладочный вывод ---
+# --- Получение пар с GeckoTerminal ---
+async def fetch_new_pairs(network):
+    url = f"https://api.geckoterminal.com/api/v2/networks/{network}/pools"
+    params = {"include": "base_token,quote_token,dex"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, ssl=ssl.create_default_context()) as resp:
+                data = await resp.json()
+                return data.get("data", []), data.get("included", [])
+    except Exception as e:
+        print(f"[ERROR] fetch_new_pairs ({network}):", e)
+        return [], []
+
+# --- Отладочная информация ---
 async def debug_stats(network, total, passed_liquidity, passed_new):
     print(f"[{network.upper()}] Total pairs: {total}, Passed liquidity: {passed_liquidity}, New: {passed_new}")
+
+# --- Периодическая проверка ---
+async def periodic_checker():
+    while True:
+        for network in NETWORKS:
+            pools, included = await fetch_new_pairs(network)
+            now = datetime.utcnow()
+
+            total = len(pools)
+            passed_liquidity = 0
+            passed_new = 0
+
+            for pool in pools:
+                try:
+                    attributes = pool['attributes']
+                    liquidity = float(attributes['reserve_in_usd'] or 0)
+
+                    if liquidity < MIN_LIQUIDITY:
+                        continue
+
+                    passed_liquidity += 1
+
+                    token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
+                    if not token_id:
+                        continue
+
+                    token_info = extract_token_info(token_id, included)
+                    token_address = token_info['address']
+                    key = pool['id']
+
+                    is_new = token_address and await is_new_token(network, token_address)
+                    if is_new:
+                        passed_new += 1
+
+                    log_sheet.append_row([
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        token_info['name'], token_info['symbol'],
+                        liquidity,
+                        attributes.get('volume_usd', {}).get('h1', 0),
+                        "NEW" if is_new else "OLD",
+                        token_address,
+                        extract_dex_name(pool, included)
+                    ])
+
+                except Exception as e:
+                    print(f"[ERROR] {network} pair check:", e)
+
+            await debug_stats(network, total, passed_liquidity, passed_new)
+        await asyncio.sleep(CHECK_INTERVAL)
+
+# --- Telegram команды ---
+@dp.message_handler(commands=['start'])
+async def start_cmd(message: types.Message):
+    await message.answer("Бот запущен. Жду новые листинги...")
+
+# --- Main ---
+async def main():
+    asyncio.create_task(periodic_checker())
+    await dp.start_polling()
+
+if __name__ == '__main__':
+    asyncio.run(main())
