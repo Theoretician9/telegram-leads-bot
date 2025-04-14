@@ -28,11 +28,12 @@ DEX_ADDRESSES = {
     'base': []
 }
 
-# Временное хранилище новых токенов
+# Временное хранилище новых токенов и pending токенов
 new_tokens = {}
+pending_tokens = {}
+PENDING_TTL = timedelta(minutes=180)
 
 def is_recent(address):
-    """Проверка, был ли токен недавно задеплоен"""
     created = new_tokens.get(address)
     if not created:
         return False
@@ -40,10 +41,19 @@ def is_recent(address):
 
 def record_deploy(address):
     new_tokens[address] = datetime.utcnow()
+    pending_tokens[address] = datetime.utcnow()
+
+def cleanup_pending():
+    now = datetime.utcnow()
+    expired = [addr for addr, ts in pending_tokens.items() if now - ts > PENDING_TTL]
+    for addr in expired:
+        del pending_tokens[addr]
 
 async def handle_event(chain, tx):
     from_address = tx['from']
     to_address = tx.get('to')
+
+    cleanup_pending()
 
     # Проверка на создание контракта (деплой)
     if to_address is None:
@@ -54,9 +64,13 @@ async def handle_event(chain, tx):
 
     # Проверка на добавление ликвидности
     if to_address.lower() in DEX_ADDRESSES.get(chain, []):
-        if is_recent(from_address.lower()):
-            print(f"[{chain.upper()}] ✅ NEW LISTING EVENT! Token: {from_address} to DEX: {to_address}")
+        from_lower = from_address.lower()
+        if from_lower in pending_tokens:
+            print(f"[{chain.upper()}] 📣 NEW LISTING: {from_address} to DEX: {to_address}")
+            del pending_tokens[from_lower]
             # Тут можно будет добавить запись в таблицу / Telegram
+        elif is_recent(from_lower):
+            print(f"[{chain.upper()}] ✅ NEW LISTING EVENT! Token: {from_address} to DEX: {to_address}")
         else:
             print(f"[{chain.upper()}] 💧 POSSIBLE LIQUIDITY EVENT: {from_address} → {to_address}")
 
@@ -77,7 +91,6 @@ async def listen(chain, url):
                 data = json.loads(message)
                 if 'params' in data:
                     tx_hash = data['params']['result']
-                    # Получаем данные транзакции
                     async with aiohttp.ClientSession() as session:
                         async with session.post(NETWORKS[chain].replace('wss://', 'https://'), json={
                             "jsonrpc": "2.0",
