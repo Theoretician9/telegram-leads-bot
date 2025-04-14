@@ -67,6 +67,16 @@ def extract_token_info(token_id, included):
             }
     return {'name': 'Unknown', 'symbol': '?', 'address': 'unknown'}
 
+# --- Получение имени биржи ---
+def extract_dex_name(pool, included):
+    dex_id = pool.get('relationships', {}).get('dex', {}).get('data', {}).get('id')
+    if not dex_id:
+        return "Unknown"
+    for entry in included:
+        if entry['id'] == dex_id and entry['type'] == 'dex':
+            return entry.get('attributes', {}).get('name', 'Unknown')
+    return "Unknown"
+
 # --- Проверка возраста токена через BscScan ---
 async def is_new_token(token_address):
     try:
@@ -94,7 +104,7 @@ async def is_new_token(token_address):
 # --- Парсинг новых пар с GeckoTerminal ---
 async def fetch_new_pairs():
     url = f"https://api.geckoterminal.com/api/v2/networks/{NETWORK}/pools"
-    params = {"include": "base_token,quote_token"}
+    params = {"include": "base_token,quote_token,dex"}
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, ssl=ssl.create_default_context()) as resp:
@@ -116,13 +126,13 @@ async def check_volume():
 
         volume = float(pool['data']['attributes']['volume_usd']['h1'] or 0)
         if volume >= MIN_VOLUME:
-            await send_token_alert(pool['data'], pool['token_info'], pool['quote_info'])
+            await send_token_alert(pool['data'], pool['token_info'], pool['quote_info'], pool['dex_name'])
             expired.append(key)
     for key in expired:
         del pending_tokens[key]
 
 # --- Отправка уведомления ---
-async def send_token_alert(pool, token_info, quote_info):
+async def send_token_alert(pool, token_info, quote_info, dex_name):
     attributes = pool.get('attributes', {})
     token_name = token_info['name']
     symbol = token_info['symbol']
@@ -134,7 +144,6 @@ async def send_token_alert(pool, token_info, quote_info):
     liquidity = float(attributes.get('reserve_in_usd', 0) or 0)
     volume = float(attributes.get('volume_usd', {}).get('h1', 0) or 0)
     pool_id = pool.get('id', 'unknown').split('_')[-1]
-    dex_name = attributes.get('dex_name', 'Unknown')
 
     gecko_url = f"https://www.geckoterminal.com/{NETWORK}/pools/{pool_id}"
     dex_url = f"https://dexscreener.com/{NETWORK}/{pool_id}"
@@ -174,11 +183,11 @@ async def periodic_checker():
 
                 token_info = extract_token_info(base_token_id, included)
                 quote_info = extract_token_info(quote_token_id, included)
+                dex_name = extract_dex_name(pool, included)
 
                 token_address = token_info['address']
                 key = pool['id']
                 pool_id = key.split('_')[-1]
-                dex_name = attributes.get('dex_name', 'Unknown')
 
                 log_sheet.append_row([
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -193,7 +202,13 @@ async def periodic_checker():
 
                 if liquidity >= MIN_LIQUIDITY and key not in pending_tokens and key not in sent_tokens:
                     if token_address and await is_new_token(token_address):
-                        pending_tokens[key] = {'data': pool, 'timestamp': now, 'token_info': token_info, 'quote_info': quote_info}
+                        pending_tokens[key] = {
+                            'data': pool,
+                            'timestamp': now,
+                            'token_info': token_info,
+                            'quote_info': quote_info,
+                            'dex_name': dex_name
+                        }
             except Exception as e:
                 print("[ERROR] during liquidity/new token check:", e)
         await check_volume()
