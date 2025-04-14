@@ -128,3 +128,7 @@ async def is_new_token(network, token_address):
     except Exception as e:
         print(f"[ERROR] {network} Scan contract age check:", e)
     return False
+
+# --- Добавим отладочный вывод ---
+async def debug_stats(network, total, passed_liquidity, passed_new):
+    print(f"[{network.upper()}] Total pairs: {total}, Passed liquidity: {passed_liquidity}, New: {passed_new}")
