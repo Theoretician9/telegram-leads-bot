@@ -116,17 +116,20 @@ async def check_volume():
 
         volume = float(pool['data']['attributes']['volume_usd']['h1'] or 0)
         if volume >= MIN_VOLUME:
-            await send_token_alert(pool['data'], pool['token_info'])
+            await send_token_alert(pool['data'], pool['token_info'], pool['quote_info'])
             expired.append(key)
     for key in expired:
         del pending_tokens[key]
 
 # --- Отправка уведомления ---
-async def send_token_alert(pool, token_info):
+async def send_token_alert(pool, token_info, quote_info):
     attributes = pool.get('attributes', {})
     token_name = token_info['name']
     symbol = token_info['symbol']
     token_address = token_info['address']
+
+    quote_name = quote_info['name']
+    quote_symbol = quote_info['symbol']
 
     liquidity = float(attributes.get('reserve_in_usd', 0) or 0)
     volume = float(attributes.get('volume_usd', {}).get('h1', 0) or 0)
@@ -142,7 +145,7 @@ async def send_token_alert(pool, token_info):
         return
     sent_tokens.add(key)
 
-    text = f"\U0001F539 <b>Новая пара:</b> {token_name} (${symbol})\n" \
+    text = f"\U0001F539 <b>Новая пара:</b> {token_name} (${symbol}) / {quote_name} (${quote_symbol})\n" \
            f"\n\U0001F4B0 <b>Ликвидность:</b> ${int(liquidity):,}" \
            f"\n\U0001F4CA <b>Объём (1ч):</b> ${int(volume):,}" \
            f"\n\U0001F3E2 <b>Биржа:</b> {dex_name}" \
@@ -151,7 +154,7 @@ async def send_token_alert(pool, token_info):
     await bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML")
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    row = [now, token_name, symbol, liquidity, volume, dex_name, pool_id, gecko_url, dex_url, pancake_url]
+    row = [now, token_name, symbol, quote_name, quote_symbol, liquidity, volume, dex_name, pool_id, gecko_url, dex_url, pancake_url]
     sheet.append_row(row)
 
 # --- Периодическая проверка ---
@@ -164,11 +167,14 @@ async def periodic_checker():
                 attributes = pool['attributes']
                 liquidity = float(attributes['reserve_in_usd'] or 0)
 
-                token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
-                if not token_id:
+                base_token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
+                quote_token_id = pool.get('relationships', {}).get('quote_token', {}).get('data', {}).get('id')
+                if not base_token_id or not quote_token_id:
                     continue
 
-                token_info = extract_token_info(token_id, included)
+                token_info = extract_token_info(base_token_id, included)
+                quote_info = extract_token_info(quote_token_id, included)
+
                 token_address = token_info['address']
                 key = pool['id']
                 pool_id = key.split('_')[-1]
@@ -177,6 +183,7 @@ async def periodic_checker():
                 log_sheet.append_row([
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     token_info['name'], token_info['symbol'],
+                    quote_info['name'], quote_info['symbol'],
                     liquidity,
                     attributes.get('volume_usd', {}).get('h1', 0),
                     "NEW" if token_address and await is_new_token(token_address) else "OLD",
@@ -186,7 +193,7 @@ async def periodic_checker():
 
                 if liquidity >= MIN_LIQUIDITY and key not in pending_tokens and key not in sent_tokens:
                     if token_address and await is_new_token(token_address):
-                        pending_tokens[key] = {'data': pool, 'timestamp': now, 'token_info': token_info}
+                        pending_tokens[key] = {'data': pool, 'timestamp': now, 'token_info': token_info, 'quote_info': quote_info}
             except Exception as e:
                 print("[ERROR] during liquidity/new token check:", e)
         await check_volume()
