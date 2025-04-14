@@ -115,7 +115,7 @@ async def send_token_alert(pool):
     attributes = pool.get('attributes', {})
     base_token = attributes.get('base_token', {})
 
-    token_name = base_token.get('name', 'Unknown')
+    token_name = base_token.get('name') or base_token.get('symbol') or 'Unknown'
     symbol = base_token.get('symbol', '?')
     liquidity = float(attributes.get('reserve_in_usd', 0) or 0)
     volume = float(attributes.get('volume_usd', {}).get('h1', 0) or 0)
@@ -153,7 +153,7 @@ async def periodic_checker():
                 liquidity = float(attributes['reserve_in_usd'] or 0)
                 base_token = attributes.get('base_token', {})
                 token_address = base_token.get('address')
-                token_name = base_token.get('name', 'Unknown')
+                token_name = base_token.get('name') or base_token.get('symbol') or 'Unknown'
                 symbol = base_token.get('symbol', '?')
                 key = pool['id']
 
