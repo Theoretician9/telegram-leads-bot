@@ -131,6 +131,7 @@ async def send_token_alert(pool, token_info):
     liquidity = float(attributes.get('reserve_in_usd', 0) or 0)
     volume = float(attributes.get('volume_usd', {}).get('h1', 0) or 0)
     pool_id = pool.get('id', 'unknown').split('_')[-1]
+    dex_name = attributes.get('dex_name', 'Unknown')
 
     gecko_url = f"https://www.geckoterminal.com/{NETWORK}/pools/{pool_id}"
     dex_url = f"https://dexscreener.com/{NETWORK}/{pool_id}"
@@ -144,12 +145,13 @@ async def send_token_alert(pool, token_info):
     text = f"\U0001F539 <b>Новая пара:</b> {token_name} (${symbol})\n" \
            f"\n\U0001F4B0 <b>Ликвидность:</b> ${int(liquidity):,}" \
            f"\n\U0001F4CA <b>Объём (1ч):</b> ${int(volume):,}" \
+           f"\n\U0001F3E2 <b>Биржа:</b> {dex_name}" \
            f"\n\U0001F517 <a href='{gecko_url}'>GeckoTerminal</a> | <a href='{dex_url}'>DexScreener</a> | <a href='{pancake_url}'>PancakeSwap</a>"
 
     await bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML")
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    row = [now, token_name, symbol, liquidity, volume, gecko_url, dex_url, pancake_url]
+    row = [now, token_name, symbol, liquidity, volume, dex_name, pool_id, gecko_url, dex_url, pancake_url]
     sheet.append_row(row)
 
 # --- Периодическая проверка ---
@@ -169,13 +171,17 @@ async def periodic_checker():
                 token_info = extract_token_info(token_id, included)
                 token_address = token_info['address']
                 key = pool['id']
+                pool_id = key.split('_')[-1]
+                dex_name = attributes.get('dex_name', 'Unknown')
 
                 log_sheet.append_row([
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     token_info['name'], token_info['symbol'],
                     liquidity,
                     attributes.get('volume_usd', {}).get('h1', 0),
-                    "NEW" if token_address and await is_new_token(token_address) else "OLD"
+                    "NEW" if token_address and await is_new_token(token_address) else "OLD",
+                    dex_name,
+                    pool_id
                 ])
 
                 if liquidity >= MIN_LIQUIDITY and key not in pending_tokens and key not in sent_tokens:
