@@ -140,7 +140,7 @@ async def send_token_alert(pool):
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     row = [now, token_name, symbol, liquidity, volume, gecko_url, dex_url, pancake_url]
-    log_sheet.append_row(row)
+    sheet.append_row(row)
 
 # --- Периодическая проверка ---
 async def periodic_checker():
@@ -153,7 +153,17 @@ async def periodic_checker():
                 liquidity = float(attributes['reserve_in_usd'] or 0)
                 base_token = attributes.get('base_token', {})
                 token_address = base_token.get('address')
+                token_name = base_token.get('name', 'Unknown')
+                symbol = base_token.get('symbol', '?')
                 key = pool['id']
+
+                log_sheet.append_row([
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    token_name, symbol,
+                    liquidity,
+                    attributes.get('volume_usd', {}).get('h1', 0),
+                    "NEW" if token_address and await is_new_token(token_address) else "OLD"
+                ])
 
                 if liquidity >= MIN_LIQUIDITY and key not in pending_tokens and key not in sent_tokens:
                     if token_address and await is_new_token(token_address):
