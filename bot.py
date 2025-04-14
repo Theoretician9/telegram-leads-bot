@@ -4,7 +4,7 @@ import ssl
 import asyncio
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import aiohttp
 import gspread
@@ -17,7 +17,7 @@ API_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1HiPi8UX_ekCHVDXdRxHwD3NlD2w796T2z_BjNBUj8Bg/edit"
 MIN_LIQUIDITY = 5000
 MIN_VOLUME = 2000
-CHECK_INTERVAL = 60
+CHECK_INTERVAL = 20
 NETWORK = "bsc"
 
 # --- Проверка переменных окружения ---
@@ -43,13 +43,15 @@ creds_dict = json.loads(creds_raw)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_url(SPREADSHEET_URL).sheet1
+log_sheet = client.open_by_url(SPREADSHEET_URL).get_worksheet(1)  # Вторая вкладка под лог
 
 # --- Telegram Bot ---
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# --- Хранилище уже отправленных токенов ---
+# --- Хранилище уже проверенных токенов ---
 sent_tokens = set()
+pending_tokens = {}
 
 # --- Парсинг новых пар с GeckoTerminal ---
 async def fetch_new_pairs():
@@ -64,22 +66,33 @@ async def fetch_new_pairs():
         print("[ERROR] fetch_new_pairs:", e)
         return []
 
+# --- Проверка торгового объёма ---
+async def check_volume():
+    now = datetime.utcnow()
+    expired = []
+    for key, pool in pending_tokens.items():
+        first_seen = pool['timestamp']
+        if now - first_seen > timedelta(minutes=2):
+            expired.append(key)
+            continue
+
+        volume = float(pool['data']['attributes']['volume_usd']['h1'] or 0)
+        if volume >= MIN_VOLUME:
+            await send_token_alert(pool['data'])
+            expired.append(key)
+    for key in expired:
+        del pending_tokens[key]
+
 # --- Отправка уведомления с кнопками ---
 async def send_token_alert(pool):
-    attributes = pool.get('attributes', {})
-    base_token = attributes.get('base_token', {})
-    symbol = base_token.get('symbol')
-    token_name = base_token.get('name')
-
-    if not symbol or not token_name:
-        return  # Пропускаем, если информации нет
-
-    liquidity = float(attributes.get('reserve_in_usd') or 0)
-    volume = float(attributes.get('volume_usd', {}).get('h1') or 0)
-    pair_url = f"https://www.geckoterminal.com/{NETWORK}/pools/{pool['id'].split('_')[-1]}"
-
-    if liquidity < MIN_LIQUIDITY or volume < MIN_VOLUME:
-        return
+    token_name = pool['attributes']['base_token']['name']
+    symbol = pool['attributes']['base_token']['symbol']
+    liquidity = float(pool['attributes']['reserve_in_usd'] or 0)
+    volume = float(pool['attributes']['volume_usd']['h1'] or 0)
+    pool_id = pool['id'].split('_')[-1]
+    gecko_url = f"https://www.geckoterminal.com/{NETWORK}/pools/{pool_id}"
+    dex_url = f"https://dexscreener.com/{NETWORK}/{pool_id}"
+    pancake_url = f"https://pancakeswap.finance/swap?outputCurrency={pool['attributes']['base_token']['address']}"
 
     key = pool['id']
     if key in sent_tokens:
@@ -89,23 +102,28 @@ async def send_token_alert(pool):
     text = f"\U0001F539 <b>Новая пара:</b> {token_name} (${symbol})\n" \
            f"\n\U0001F4B0 <b>Ликвидность:</b> ${int(liquidity):,}" \
            f"\n\U0001F4CA <b>Объём (1ч):</b> ${int(volume):,}" \
-           f"\n\U0001F517 <a href=\"{pair_url}\">GeckoTerminal</a>"
+           f"\n\U0001F517 <a href='{gecko_url}'>GeckoTerminal</a> | <a href='{dex_url}'>DexScreener</a> | <a href='{pancake_url}'>PancakeSwap</a>"
 
-    keyboard = InlineKeyboardMarkup(row_width=3)
-    keyboard.add(
-        InlineKeyboardButton("\U0001F50D Анализ", callback_data=f"analyze|{key}"),
-        InlineKeyboardButton("➕ В трекер", callback_data=f"track|{key}"),
-        InlineKeyboardButton("\U0001F9E0 Контракт", callback_data=f"contract|{key}")
-    )
+    await bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML")
 
-    await bot.send_message(chat_id=admin_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    row = [now, token_name, symbol, liquidity, volume, gecko_url, dex_url, pancake_url]
+    log_sheet.append_row(row)
 
 # --- Периодическая проверка ---
 async def periodic_checker():
     while True:
         pools = await fetch_new_pairs()
+        now = datetime.utcnow()
         for pool in pools:
-            await send_token_alert(pool)
+            try:
+                liquidity = float(pool['attributes']['reserve_in_usd'] or 0)
+                key = pool['id']
+                if liquidity >= MIN_LIQUIDITY and key not in pending_tokens and key not in sent_tokens:
+                    pending_tokens[key] = {'data': pool, 'timestamp': now}
+            except Exception as e:
+                print("[ERROR] during liquidity check:", e)
+        await check_volume()
         await asyncio.sleep(CHECK_INTERVAL)
 
 # --- Обработка нажатий кнопок ---
@@ -120,7 +138,7 @@ async def handle_track(call: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("analyze|"))
 async def handle_analyze(call: types.CallbackQuery):
-    await call.answer("Скоро добавим анализ 🚧", show_alert=True)
+    await call.answer("Скоро добавим анализ \U0001F6A7", show_alert=True)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("contract|"))
 async def handle_contract(call: types.CallbackQuery):
