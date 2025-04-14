@@ -85,16 +85,21 @@ async def check_volume():
 
 # --- Отправка уведомления с кнопками ---
 async def send_token_alert(pool):
-    token_name = pool['attributes']['base_token']['name']
-    symbol = pool['attributes']['base_token']['symbol']
-    liquidity = float(pool['attributes']['reserve_in_usd'] or 0)
-    volume = float(pool['attributes']['volume_usd']['h1'] or 0)
-    pool_id = pool['id'].split('_')[-1]
+    attributes = pool.get('attributes', {})
+    base_token = attributes.get('base_token', {})
+
+    token_name = base_token.get('name', 'Unknown')
+    symbol = base_token.get('symbol', '?')
+    liquidity = float(attributes.get('reserve_in_usd', 0) or 0)
+    volume = float(attributes.get('volume_usd', {}).get('h1', 0) or 0)
+    pool_id = pool.get('id', 'unknown').split('_')[-1]
+    token_address = base_token.get('address', 'unknown')
+
     gecko_url = f"https://www.geckoterminal.com/{NETWORK}/pools/{pool_id}"
     dex_url = f"https://dexscreener.com/{NETWORK}/{pool_id}"
-    pancake_url = f"https://pancakeswap.finance/swap?outputCurrency={pool['attributes']['base_token']['address']}"
+    pancake_url = f"https://pancakeswap.finance/swap?outputCurrency={token_address}"
 
-    key = pool['id']
+    key = pool.get('id')
     if key in sent_tokens:
         return
     sent_tokens.add(key)
