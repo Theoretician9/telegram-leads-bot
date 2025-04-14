@@ -83,19 +83,6 @@ def extract_token_info(token_id, included):
             }
     return {'name': 'Unknown', 'symbol': '?', 'address': 'unknown'}
 
-def extract_quote_token_info(pool, included):
-    quote_id = pool.get('relationships', {}).get('quote_token', {}).get('data', {}).get('id')
-    if not quote_id:
-        return {'name': 'Unknown', 'symbol': '?'}
-    for entry in included:
-        if entry['id'] == quote_id and entry['type'] == 'token':
-            attrs = entry.get('attributes', {})
-            return {
-                'name': attrs.get('name') or 'Unknown',
-                'symbol': attrs.get('symbol') or '?'
-            }
-    return {'name': 'Unknown', 'symbol': '?'}
-
 # --- Получение имени биржи ---
 def extract_dex_name(pool, included):
     dex_id = pool.get('relationships', {}).get('dex', {}).get('data', {}).get('id')
@@ -130,9 +117,12 @@ async def is_new_token(network, token_address):
         }
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params) as resp:
-                data = await resp.json()
+                try:
+                    data = await resp.json()
+                except Exception:
+                    return False
                 result = data.get("result", [])
-                if not result:
+                if not isinstance(result, list) or not result:
                     return False
                 first_tx = result[0].get("timeStamp")
                 if first_tx:
@@ -181,17 +171,20 @@ async def periodic_checker():
                     passed_liquidity += 1
 
                     token_id = pool.get('relationships', {}).get('base_token', {}).get('data', {}).get('id')
-                    if not token_id:
+                    quote_id = pool.get('relationships', {}).get('quote_token', {}).get('data', {}).get('id')
+                    if not token_id or not quote_id:
                         continue
 
                     token_info = extract_token_info(token_id, included)
-                    quote_info = extract_quote_token_info(pool, included)
+                    quote_info = extract_token_info(quote_id, included)
+
                     token_address = token_info['address']
                     key = pool['id']
 
                     is_new = token_address and await is_new_token(network, token_address)
                     if is_new:
                         passed_new += 1
+
                         log_sheet.append_row([
                             datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                             token_info['name'], token_info['symbol'],
