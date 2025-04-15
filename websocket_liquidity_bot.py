@@ -8,6 +8,7 @@ import aiohttp
 from dotenv import load_dotenv
 import os
 from aiogram import Bot
+import random
 
 load_dotenv()
 
@@ -80,7 +81,7 @@ async def handle_event(chain, tx):
 
 
 async def listen(chain, url):
-    reconnect_delay = 5
+    reconnect_attempt = 0
     while True:
         try:
             async with websockets.connect(url, ping_interval=60, ping_timeout=30, max_queue=None) as ws:
@@ -92,7 +93,7 @@ async def listen(chain, url):
                 }
                 await ws.send(json.dumps(subscribe))
                 print(f"[{chain.upper()}] Connected to WebSocket")
-                reconnect_delay = 5
+                reconnect_attempt = 0
 
                 while True:
                     try:
@@ -115,9 +116,10 @@ async def listen(chain, url):
                         print(f"[{chain.upper()}] ⚠️ Inner error: {type(inner_e).__name__}: {inner_e}")
                         await asyncio.sleep(3)
         except Exception as outer_e:
-            print(f"[{chain.upper()}] 🔁 Reconnecting WebSocket due to error: {type(outer_e).__name__}: {outer_e}")
-            await asyncio.sleep(reconnect_delay)
-            reconnect_delay = min(reconnect_delay * 2, 60)
+            reconnect_attempt += 1
+            delay = min(5 * reconnect_attempt + random.randint(1, 5), 60)
+            print(f"[{chain.upper()}] 🔁 Reconnecting WebSocket in {delay}s due to error: {type(outer_e).__name__}: {outer_e}")
+            await asyncio.sleep(delay)
 
 
 async def main():
