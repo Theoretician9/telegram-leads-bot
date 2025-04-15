@@ -39,21 +39,25 @@ new_tokens = {}
 pending_tokens = {}
 PENDING_TTL = timedelta(minutes=180)
 
+
 def is_recent(address):
     created = new_tokens.get(address)
     if not created:
         return False
     return (datetime.utcnow() - created).total_seconds() < 600  # 10 минут
 
+
 def record_deploy(address):
     new_tokens[address] = datetime.utcnow()
     pending_tokens[address] = datetime.utcnow()
+
 
 def cleanup_pending():
     now = datetime.utcnow()
     expired = [addr for addr, ts in pending_tokens.items() if now - ts > PENDING_TTL]
     for addr in expired:
         del pending_tokens[addr]
+
 
 async def send_telegram(text):
     if not BOT_TOKEN or not CHAT_ID:
@@ -62,6 +66,7 @@ async def send_telegram(text):
         await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
     except Exception as e:
         print(f"[TELEGRAM ERROR] {e}")
+
 
 async def handle_event(chain, tx):
     from_address = tx['from']
@@ -90,10 +95,12 @@ async def handle_event(chain, tx):
         else:
             print(f"[{chain.upper()}] 💧 POSSIBLE LIQUIDITY EVENT: {from_address} → {to_address}")
 
+
 async def listen(chain, url):
+    reconnect_delay = 5
     while True:
         try:
-            async with websockets.connect(url, ping_interval=60, ping_timeout=20, max_queue=None) as ws:
+            async with websockets.connect(url, ping_interval=60, ping_timeout=30, max_queue=None) as ws:
                 subscribe = {
                     "jsonrpc": "2.0",
                     "id": 1,
@@ -102,6 +109,7 @@ async def listen(chain, url):
                 }
                 await ws.send(json.dumps(subscribe))
                 print(f"[{chain.upper()}] Connected to WebSocket")
+                reconnect_delay = 5  # сбрасываем задержку при успешном подключении
 
                 while True:
                     try:
@@ -124,8 +132,10 @@ async def listen(chain, url):
                         print(f"[{chain.upper()}] ⚠️ Inner error: {type(inner_e).__name__}: {inner_e}")
                         await asyncio.sleep(3)
         except Exception as outer_e:
-            print(f"[{chain.upper()}] Reconnecting due to error: {outer_e}")
-            await asyncio.sleep(10)
+            print(f"[{chain.upper()}] 🔁 Reconnecting WebSocket due to error: {type(outer_e).__name__}: {outer_e}")
+            await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, 60)
+
 
 async def main():
     tasks = [listen(chain, url) for chain, url in NETWORKS.items() if url]
