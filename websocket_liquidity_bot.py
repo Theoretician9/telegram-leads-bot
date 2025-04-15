@@ -35,29 +35,18 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 bot = Bot(token=BOT_TOKEN)
 
 # Временное хранилище новых токенов и pending токенов
-new_tokens = {}
 pending_tokens = {}
-PENDING_TTL = timedelta(minutes=180)
-
-
-def is_recent(address):
-    created = new_tokens.get(address)
-    if not created:
-        return False
-    return (datetime.utcnow() - created).total_seconds() < 600  # 10 минут
+PENDING_TTL = timedelta(hours=72)  # Храним токены до 72 часов
 
 
 def record_deploy(address):
-    new_tokens[address] = datetime.utcnow()
     pending_tokens[address] = datetime.utcnow()
-
 
 def cleanup_pending():
     now = datetime.utcnow()
     expired = [addr for addr, ts in pending_tokens.items() if now - ts > PENDING_TTL]
     for addr in expired:
         del pending_tokens[addr]
-
 
 async def send_telegram(text):
     if not BOT_TOKEN or not CHAT_ID:
@@ -66,7 +55,6 @@ async def send_telegram(text):
         await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
     except Exception as e:
         print(f"[TELEGRAM ERROR] {e}")
-
 
 async def handle_event(chain, tx):
     from_address = tx['from']
@@ -81,19 +69,14 @@ async def handle_event(chain, tx):
         record_deploy(contract.lower())
         return
 
-    # Проверка на добавление ликвидности
-    if to_address.lower() in DEX_ADDRESSES.get(chain, []):
-        from_lower = from_address.lower()
-        if from_lower in pending_tokens:
-            print(f"[{chain.upper()}] 📣 NEW LISTING: {from_address} to DEX: {to_address}")
-            await send_telegram(
-                f"[{chain.upper()}] 📣 *NEW LISTING!*\nToken: `{from_address}`\nDEX: `{to_address}`"
-            )
-            del pending_tokens[from_lower]
-        elif is_recent(from_lower):
-            print(f"[{chain.upper()}] ✅ NEW LISTING EVENT! Token: {from_address} to DEX: {to_address}")
-        else:
-            print(f"[{chain.upper()}] 💧 POSSIBLE LIQUIDITY EVENT: {from_address} → {to_address}")
+    # Проверка на добавление ликвидности только для ранее задеплоенных токенов
+    from_lower = from_address.lower()
+    if from_lower in pending_tokens and to_address and to_address.lower() in DEX_ADDRESSES.get(chain, []):
+        print(f"[{chain.upper()}] 📣 NEW LISTING: {from_address} to DEX: {to_address}")
+        await send_telegram(
+            f"[{chain.upper()}] 📣 *NEW LISTING!*\nToken: `{from_address}`\nDEX: `{to_address}`"
+        )
+        del pending_tokens[from_lower]
 
 
 async def listen(chain, url):
@@ -109,7 +92,7 @@ async def listen(chain, url):
                 }
                 await ws.send(json.dumps(subscribe))
                 print(f"[{chain.upper()}] Connected to WebSocket")
-                reconnect_delay = 5  # сбрасываем задержку при успешном подключении
+                reconnect_delay = 5
 
                 while True:
                     try:
