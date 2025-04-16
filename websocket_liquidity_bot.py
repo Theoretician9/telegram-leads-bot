@@ -123,7 +123,6 @@ async def listen(chain, url):
 
                     while True:
                         try:
-                            print(f"[{chain.upper()}] 🟢 Waiting for tx...")
                             message = await ws.recv()
                             data = json.loads(message)
                             if 'params' in data:
