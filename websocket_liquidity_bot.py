@@ -101,48 +101,53 @@ async def handle_event(chain, tx):
 
 async def listen(chain, url):
     reconnect_delay = 5
+    max_retries = 5
     while True:
-        try:
-            async with websockets.connect(
-                url,
-                ping_interval=20,
-                ping_timeout=10,
-                max_queue=None
-            ) as ws:
-                subscribe = {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "eth_subscribe",
-                    "params": ["newPendingTransactions"]
-                }
-                await ws.send(json.dumps(subscribe))
-                print(f"[{chain.upper()}] Connected to WebSocket")
-                reconnect_delay = 5
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with websockets.connect(
+                    url,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    max_queue=None
+                ) as ws:
+                    subscribe = {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "eth_subscribe",
+                        "params": ["newPendingTransactions"]
+                    }
+                    await ws.send(json.dumps(subscribe))
+                    print(f"[{chain.upper()}] Connected to WebSocket")
+                    reconnect_delay = 5
 
-                while True:
-                    try:
-                        message = await ws.recv()
-                        data = json.loads(message)
-                        if 'params' in data:
-                            tx_hash = data['params']['result']
-                            async with aiohttp.ClientSession() as session:
-                                async with session.post(NETWORKS[chain].replace('wss://', 'https://'), json={
-                                    "jsonrpc": "2.0",
-                                    "id": 1,
-                                    "method": "eth_getTransactionByHash",
-                                    "params": [tx_hash]
-                                }) as resp:
-                                    tx_data = await resp.json()
-                                    tx = tx_data.get("result")
-                                    if tx:
-                                        await handle_event(chain, tx)
-                    except Exception as inner_e:
-                        print(f"[{chain.upper()}] ⚠️ Inner error: {type(inner_e).__name__}: {inner_e}")
-                        await asyncio.sleep(3)
-        except Exception as outer_e:
-            print(f"[{chain.upper()}] 🔁 Reconnecting WebSocket due to error: {type(outer_e).__name__}: {outer_e}")
-            await asyncio.sleep(reconnect_delay)
-            reconnect_delay = min(reconnect_delay * 2, 60)
+                    while True:
+                        try:
+                            print(f"[{chain.upper()}] 🟢 Waiting for tx...")
+                            message = await ws.recv()
+                            data = json.loads(message)
+                            if 'params' in data:
+                                tx_hash = data['params']['result']
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.post(NETWORKS[chain].replace('wss://', 'https://'), json={
+                                        "jsonrpc": "2.0",
+                                        "id": 1,
+                                        "method": "eth_getTransactionByHash",
+                                        "params": [tx_hash]
+                                    }) as resp:
+                                        tx_data = await resp.json()
+                                        tx = tx_data.get("result")
+                                        if tx:
+                                            await handle_event(chain, tx)
+                        except Exception as inner_e:
+                            print(f"[{chain.upper()}] ⚠️ Inner error: {type(inner_e).__name__}: {inner_e}")
+                            await asyncio.sleep(3)
+            except Exception as outer_e:
+                print(f"[{chain.upper()}] 🔁 Reconnecting WebSocket (attempt {attempt}/{max_retries}) due to error: {type(outer_e).__name__}: {outer_e}")
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 60)
+        print(f"[{chain.upper()}] ❌ Max retries reached. Waiting before retrying...")
+        await asyncio.sleep(120)
 
 async def main():
     listeners = []
