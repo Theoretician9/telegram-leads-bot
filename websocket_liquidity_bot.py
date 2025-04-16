@@ -27,25 +27,25 @@ NETWORKS = {
 # DEX Router адреса для отслеживания ликвидности
 DEX_ADDRESSES = {
     'bsc': [
-        "0x10ed43c718714eb63d5aa57b78b54704e256024e",  # PancakeSwap V2
-        "0xc9b085d878e28fa776b1e269595f65726b000039",  # Biswap
-        "0x05ff2b0db69458a0750badebc4f9e13add608c7f"   # ApeSwap
+        "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+        "0xc9b085d878e28fa776b1e269595f65726b000039",
+        "0x05ff2b0db69458a0750badebc4f9e13add608c7f"
     ],
     'polygon': [
-        "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff",  # QuickSwap
-        "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506"   # SushiSwap
+        "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff",
+        "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506"
     ],
     'eth': [
-        "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",  # Uniswap V2
-        "0xE592427A0AEce92De3Edee1F18E0157C05861564"   # Uniswap V3
+        "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+        "0xE592427A0AEce92De3Edee1F18E0157C05861564"
     ],
     'arbitrum': [
-        "0x1f98431c8ad98523631ae4a59f267346ea31f984",  # Uniswap
-        "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"   # Uniswap router
+        "0x1f98431c8ad98523631ae4a59f267346ea31f984",
+        "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"
     ],
     'base': [
-        "0x420dd381b31aef6683fa7eebdd3f1f5e78c82cb9",  # Aerodrome
-        "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86"   # Alien Base
+        "0x420dd381b31aef6683fa7eebdd3f1f5e78c82cb9",
+        "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86"
     ]
 }
 
@@ -58,7 +58,7 @@ dp = Dispatcher()
 # Redis клиент
 REDIS_URL = os.getenv("REDIS_URL")
 redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-PENDING_TTL = 72 * 3600  # 72 часа в секундах
+PENDING_TTL = 72 * 3600
 
 async def record_deploy(address):
     print(f"[REDIS] saving pending: {address}")
@@ -66,9 +66,6 @@ async def record_deploy(address):
 
 async def is_pending(address):
     return await redis_client.exists(f"pending:{address.lower()}")
-
-# async def remove_pending(address):
-#     await redis_client.delete(f"pending:{address.lower()}")
 
 async def send_telegram(text):
     if not BOT_TOKEN or not CHAT_ID:
@@ -86,24 +83,21 @@ async def handle_event(chain, tx):
     from_address = tx['from']
     to_address = tx.get('to')
 
-    # Проверка на создание контракта (деплой)
     if to_address is None:
         contract = tx['hash']
         print(f"[{chain.upper()}] 🚀 POSSIBLE TOKEN DEPLOYMENT: {contract}")
         await record_deploy(contract)
         return
 
-    # Проверка на добавление ликвидности только для ранее задеплоенных токенов
     from_lower = from_address.lower()
     if await is_pending(from_lower) and to_address and to_address.lower() in DEX_ADDRESSES.get(chain, []):
         print(f"[{chain.upper()}] ✅ Sending NEW LISTING alert for {from_address}")
         print(f"[{chain.upper()}] ⬆️ Sending to Telegram: Token {from_address} to DEX {to_address}")
         await send_telegram(
-            f"[{chain.upper()}] 📣 *NEW LISTING!*
-Token: `{from_address}`
-DEX: `{to_address}`"
+            f"[{chain.upper()}] 📣 *NEW LISTING!*\n"
+            f"Token: `{from_address}`\n"
+            f"DEX: `{to_address}`"
         )
-        # await remove_pending(from_lower)  # Временно не удаляем токен из Redis
 
 async def listen(chain, url):
     reconnect_delay = 5
@@ -155,7 +149,7 @@ async def main():
     for i, (chain, url) in enumerate(NETWORKS.items()):
         if url:
             listeners.append(asyncio.create_task(listen(chain, url)))
-            await asyncio.sleep(1)  # Пауза между подключениями
+            await asyncio.sleep(1)
     await dp.start_polling(bot)
     await asyncio.gather(*listeners)
 
